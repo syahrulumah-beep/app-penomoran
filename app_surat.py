@@ -1,4 +1,3 @@
-# contents of file
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
@@ -9,7 +8,7 @@ import io
 
 # Konfigurasi Halaman
 st.set_page_config(
-    page_title="U+1F3E5 Sistem Penomoran Klinik Utama Rawat Inap Parung",
+    page_title="🏥 Sistem Penomoran Klinik Utama Rawat Inap Parung",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -338,8 +337,8 @@ def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, ketera
 
 
 # --- UI LAYOUT ---
-st.title("U+1F3E5 Sistem Penomoran Klinik Utama Rawat Inap Parung")
-st.subheader("UMUM DAN KEPEGAWAIAN")
+st.title("🏥 Sistem Penomoran Klinik Utama Rawat Inap Parung")
+st.subheader("Umum dan Kepegawaian")
 
 st.markdown("---")
 
@@ -543,4 +542,3 @@ with tab4:
     render_report_tab("MOU", "Perjanjian Kerjasama (MOU)", "mou")
 
 st.caption("*Setiap jenis surat memiliki penomoran terpisah. Nomor reset ke 001 setiap awal tahun. Mode penomoran kini dapat diatur per jenis surat (Lanjutkan atau Isi Nomor Kosong). Fitur 'lewati nomor' tersedia per form dan Anda dapat menggunakan kembali nomor kosong yang sudah dilewati.*")
-
