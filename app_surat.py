@@ -6,7 +6,7 @@ import os
 from fpdf import FPDF
 import io
 
-st.set_page_config(page_title="Sistem Penomoran Klinik Utama Rawat Inap Parung", layout="wide")
+st.set_page_config(page_title="Sistem Penomoran Surat Klinik Utama Rawat Inap Parung", layout="wide")
 
 DB_FILE = 'data_surat.csv'
 
@@ -431,5 +431,6 @@ with tab4:
     
     if not df_mou_filtered.empty:
         st.dataframe(df_mou_filtered.sort_values(by="No", ascending=False), use_container_width=True, hide_index=True)
+
 
 st.caption("*Setiap jenis surat memiliki penomoran terpisah. Nomor reset ke 001 setiap awal tahun. 5 nomor dilewati setiap pergantian bulan.*")
