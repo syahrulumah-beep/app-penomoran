@@ -6,10 +6,16 @@ import os
 from fpdf import FPDF
 import io
 
-st.set_page_config(page_title="Sistem Penomoran Klinik Utama Rawat Inap Parung", layout="wide")
+# Konfigurasi Halaman
+st.set_page_config(
+    page_title="Sistem Penomoran Klinik Utama Rawat Inap Parung",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 DB_FILE = 'data_surat.csv'
 
+# Inisialisasi Session State
 if 'last_saved' not in st.session_state:
     st.session_state.last_saved = {}
 
@@ -25,10 +31,6 @@ def load_data():
 
 def save_data(df):
     df.to_csv(DB_FILE, index=False)
-
-def is_end_of_month(tanggal):
-    last_day = calendar.monthrange(tanggal.year, tanggal.month)[1]
-    return tanggal.day == last_day
 
 def get_next_number(df, tanggal, jenis_surat):
     tahun = tanggal.year
@@ -50,7 +52,7 @@ def get_next_number(df, tanggal, jenis_surat):
     return current_max + 1
 
 def format_nomor(nomor):
-    return str(nomor).zfill(3)
+    return str(int(nomor)).zfill(3)
 
 def generate_single_pdf(nomor, perihal, tanggal, kepada, keterangan, jenis):
     pdf = FPDF()
@@ -99,7 +101,7 @@ def generate_single_pdf(nomor, perihal, tanggal, kepada, keterangan, jenis):
     pdf.cell(120)
     pdf.cell(0, 8, "( __________________ )", ln=True)
     
-    return pdf.output(dest='S').encode('latin-1')
+    return pdf.output(dest='S').encode('latin-1', 'replace')
 
 def generate_recap_pdf(df, start_date, end_date, jenis_surat):
     pdf = FPDF(orientation='L', format='A4')
@@ -125,21 +127,28 @@ def generate_recap_pdf(df, start_date, end_date, jenis_surat):
     for index, row in df.iterrows():
         tgl = row['Tanggal'].strftime('%d-%m-%Y') if isinstance(row['Tanggal'], date) else str(row['Tanggal'])
         
-        perihal_short = (row['Perihal'][:75] + '...') if len(str(row['Perihal'])) > 75 else str(row['Perihal'])
-        kepada_short = (row['Kepada'][:20] + '..') if len(str(row['Kepada'])) > 20 else str(row['Kepada'])
+        perihal_txt = str(row['Perihal'])
+        perihal_short = (perihal_txt[:75] + '...') if len(perihal_txt) > 75 else perihal_txt
+        
+        kepada_txt = str(row['Kepada'])
+        kepada_short = (kepada_txt[:20] + '..') if len(kepada_txt) > 20 else kepada_txt
 
-        pdf.cell(15, 8, str(row['No']).zfill(3), 1, 0, 'C')
+        pdf.cell(15, 8, str(int(row['No'])).zfill(3), 1, 0, 'C')
         pdf.cell(30, 8, tgl, 1, 0, 'C')
         pdf.cell(60, 8, str(row['Nomor_Surat']), 1, 0)
         pdf.cell(40, 8, kepada_short, 1, 0)
         pdf.cell(130, 8, perihal_short, 1, 1)
 
-    return pdf.output(dest='S').encode('latin-1')
+    return pdf.output(dest='S').encode('latin-1', 'replace')
 
 def generate_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, index=False, sheet_name='Data Surat')
+        worksheet = writer.sheets['Data Surat']
+        for i, col in enumerate(df.columns):
+            max_len = max(df[col].astype(str).map(len).max(), len(col)) + 2
+            worksheet.set_column(i, i, max_len)
     return output.getvalue()
 
 def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, keterangan, df):
@@ -183,6 +192,7 @@ def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, ketera
     return final_nomor_surat, None, pdf_bytes
 
 
+# --- UI LAYOUT ---
 st.title("Sistem Penomoran Klinik Utama Rawat Inap Parung")
 st.subheader("Umum dan Kepegawaian")
 
@@ -192,20 +202,21 @@ df = load_data()
 
 col1, col2 = st.columns(2)
 
+# --- SURAT MASUK ---
 with col1:
     with st.container(border=True):
         st.markdown("### Surat Masuk")
         st.caption("Format: Kode Klasifikasi/NomorSurat-KURIP")
         
-        with st.form("form_surat_masuk"):
-            kode_sm = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM", key="kode_sm")
-            tanggal_sm = st.date_input("Tanggal", key="tgl_sm")
-            kepada_sm = st.text_input("Kepada / Tujuan", key="kepada_sm")
-            perihal_sm = st.text_input("Perihal", key="perihal_sm")
-            keterangan_sm = st.text_area("Keterangan", height=80, key="ket_sm")
+        with st.form("form_surat_masuk", clear_on_submit=True):
+            kode_sm = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM")
+            tanggal_sm = st.date_input("Tanggal")
+            kepada_sm = st.text_input("Kepada / Tujuan")
+            perihal_sm = st.text_input("Perihal")
+            keterangan_sm = st.text_area("Keterangan", height=80)
             
             calon_no = get_next_number(df, tanggal_sm, "Surat Masuk")
-            st.info(f"Preview: **{kode_sm}/{format_nomor(calon_no)}-KURIP**")
+            st.info(f"Preview Next Number: **{format_nomor(calon_no)}**")
             
             submit_sm = st.form_submit_button("Simpan Surat Masuk")
         
@@ -217,25 +228,27 @@ with col1:
             else:
                 st.success(f"Tersimpan: {nomor}")
                 st.session_state.last_saved['sm'] = {'nomor': nomor, 'pdf': pdf_bytes}
+                st.rerun()
         
         if 'sm' in st.session_state.last_saved:
             data = st.session_state.last_saved['sm']
-            st.download_button("Download PDF", data['pdf'], f"SM_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_sm")
+            st.download_button("Download Bukti PDF", data['pdf'], f"SM_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_sm")
 
+# --- SURAT KELUAR ---
 with col2:
     with st.container(border=True):
         st.markdown("### Surat Keluar")
         st.caption("Format: Kode Klasifikasi/NomorSurat-KURIP")
         
-        with st.form("form_surat_keluar"):
-            kode_sk = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM", key="kode_sk")
-            tanggal_sk = st.date_input("Tanggal", key="tgl_sk")
-            kepada_sk = st.text_input("Kepada / Tujuan", key="kepada_sk")
-            perihal_sk = st.text_input("Perihal", key="perihal_sk")
-            keterangan_sk = st.text_area("Keterangan", height=80, key="ket_sk")
+        with st.form("form_surat_keluar", clear_on_submit=True):
+            kode_sk = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM")
+            tanggal_sk = st.date_input("Tanggal")
+            kepada_sk = st.text_input("Kepada / Tujuan")
+            perihal_sk = st.text_input("Perihal")
+            keterangan_sk = st.text_area("Keterangan", height=80)
             
             calon_no_sk = get_next_number(df, tanggal_sk, "Surat Keluar")
-            st.info(f"Preview: **{kode_sk}/{format_nomor(calon_no_sk)}-KURIP**")
+            st.info(f"Preview Next Number: **{format_nomor(calon_no_sk)}**")
             
             submit_sk = st.form_submit_button("Simpan Surat Keluar")
         
@@ -247,27 +260,29 @@ with col2:
             else:
                 st.success(f"Tersimpan: {nomor}")
                 st.session_state.last_saved['sk'] = {'nomor': nomor, 'pdf': pdf_bytes}
+                st.rerun()
         
         if 'sk' in st.session_state.last_saved:
             data = st.session_state.last_saved['sk']
-            st.download_button("Download PDF", data['pdf'], f"SK_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_sk")
+            st.download_button("Download Bukti PDF", data['pdf'], f"SK_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_sk")
 
 col3, col4 = st.columns(2)
 
+# --- SURAT KEPUTUSAN (SK) ---
 with col3:
     with st.container(border=True):
         st.markdown("### Surat Keputusan (SK)")
         st.caption("Format: Kode Klasifikasi/SK-NomorSurat/KURIP/Tahun")
         
-        with st.form("form_sk"):
-            kode_skep = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM", key="kode_skep")
-            tanggal_skep = st.date_input("Tanggal", key="tgl_skep")
-            kepada_skep = st.text_input("Kepada / Tujuan", key="kepada_skep")
-            perihal_skep = st.text_input("Perihal", key="perihal_skep")
-            keterangan_skep = st.text_area("Keterangan", height=80, key="ket_skep")
+        with st.form("form_sk", clear_on_submit=True):
+            kode_skep = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM")
+            tanggal_skep = st.date_input("Tanggal")
+            kepada_skep = st.text_input("Kepada / Tujuan")
+            perihal_skep = st.text_input("Perihal")
+            keterangan_skep = st.text_area("Keterangan", height=80)
             
             calon_no_skep = get_next_number(df, tanggal_skep, "Surat Keputusan (SK)")
-            st.info(f"Preview: **{kode_skep}/SK-{format_nomor(calon_no_skep)}/KURIP/{tanggal_skep.year}**")
+            st.info(f"Preview Next Number: **SK-{format_nomor(calon_no_skep)}**")
             
             submit_skep = st.form_submit_button("Simpan Surat Keputusan")
         
@@ -279,25 +294,27 @@ with col3:
             else:
                 st.success(f"Tersimpan: {nomor}")
                 st.session_state.last_saved['skep'] = {'nomor': nomor, 'pdf': pdf_bytes}
+                st.rerun()
         
         if 'skep' in st.session_state.last_saved:
             data = st.session_state.last_saved['skep']
-            st.download_button("Download PDF", data['pdf'], f"SKEP_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_skep")
+            st.download_button("Download Bukti PDF", data['pdf'], f"SKEP_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_skep")
 
+# --- MOU ---
 with col4:
     with st.container(border=True):
         st.markdown("### Perjanjian Kerjasama (MOU)")
         st.caption("Format: Kode Klasifikasi/NomorSurat/KURIP/Tahun")
         
-        with st.form("form_mou"):
-            kode_mou = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM", key="kode_mou")
-            tanggal_mou = st.date_input("Tanggal", key="tgl_mou")
-            kepada_mou = st.text_input("Kepada / Tujuan", key="kepada_mou")
-            perihal_mou = st.text_input("Perihal", key="perihal_mou")
-            keterangan_mou = st.text_area("Keterangan", height=80, key="ket_mou")
+        with st.form("form_mou", clear_on_submit=True):
+            kode_mou = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM")
+            tanggal_mou = st.date_input("Tanggal")
+            kepada_mou = st.text_input("Kepada / Tujuan")
+            perihal_mou = st.text_input("Perihal")
+            keterangan_mou = st.text_area("Keterangan", height=80)
             
             calon_no_mou = get_next_number(df, tanggal_mou, "Perjanjian Kerjasama (MOU)")
-            st.info(f"Preview: **{kode_mou}/{format_nomor(calon_no_mou)}/KURIP/{tanggal_mou.year}**")
+            st.info(f"Preview Next Number: **{format_nomor(calon_no_mou)}**")
             
             submit_mou = st.form_submit_button("Simpan Perjanjian Kerjasama")
         
@@ -309,144 +326,88 @@ with col4:
             else:
                 st.success(f"Tersimpan: {nomor}")
                 st.session_state.last_saved['mou'] = {'nomor': nomor, 'pdf': pdf_bytes}
+                st.rerun()
         
         if 'mou' in st.session_state.last_saved:
             data = st.session_state.last_saved['mou']
-            st.download_button("Download PDF", data['pdf'], f"MOU_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_mou")
+            st.download_button("Download Bukti PDF", data['pdf'], f"MOU_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_mou")
 
 st.markdown("---")
 st.header("Laporan & Ekspor Data")
 
 today = date.today()
+df_report = load_data()
 
 tab1, tab2, tab3, tab4 = st.tabs(["Surat Masuk", "Surat Keluar", "Surat Keputusan (SK)", "Perjanjian Kerjasama (MOU)"])
 
-with tab1:
-    st.subheader("Laporan Surat Masuk")
-    col_sm1, col_sm2 = st.columns(2)
-    with col_sm1:
-        start_sm = st.date_input("Dari Tanggal", value=today.replace(day=1), key="start_sm")
-    with col_sm2:
-        end_sm = st.date_input("Sampai Tanggal", value=today, key="end_sm")
+# FUNGSI UNTUK MENAMPILKAN DAN MENGHAPUS DATA
+def render_report_tab(tab_name, jenis_filter, key_suffix):
+    df_filtered = df_report[df_report['Jenis'] == jenis_filter]
     
-    df_sm = load_data()
-    df_sm = df_sm[df_sm['Jenis'] == "Surat Masuk"]
-    if not df_sm.empty:
-        mask = (df_sm['Tanggal'] >= start_sm) & (df_sm['Tanggal'] <= end_sm)
-        df_sm_filtered = df_sm.loc[mask]
+    st.subheader(f"Laporan {tab_name}")
+    c1, c2 = st.columns(2)
+    with c1:
+        start_d = st.date_input("Dari Tanggal", value=today.replace(day=1), key=f"start_{key_suffix}")
+    with c2:
+        end_d = st.date_input("Sampai Tanggal", value=today, key=f"end_{key_suffix}")
+    
+    if not df_filtered.empty:
+        mask = (df_filtered['Tanggal'] >= start_d) & (df_filtered['Tanggal'] <= end_d)
+        df_show = df_filtered.loc[mask]
     else:
-        df_sm_filtered = df_sm
+        df_show = df_filtered
     
-    st.info(f"Menampilkan **{len(df_sm_filtered)}** Surat Masuk")
+    st.info(f"Menampilkan **{len(df_show)}** dokumen")
     
-    col_exp_sm1, col_exp_sm2 = st.columns(2)
-    with col_exp_sm1:
-        if not df_sm_filtered.empty:
-            excel_sm = generate_excel(df_sm_filtered)
-            st.download_button("Download Excel", excel_sm, f'Surat_Masuk_{start_sm}_{end_sm}.xlsx', 
-                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key="exp_sm_xl")
-    with col_exp_sm2:
-        if not df_sm_filtered.empty:
-            pdf_sm = generate_recap_pdf(df_sm_filtered, start_sm, end_sm, "Surat Masuk")
-            st.download_button("Download PDF", pdf_sm, f'Surat_Masuk_{start_sm}_{end_sm}.pdf', 'application/pdf', key="exp_sm_pdf")
+    c_exp1, c_exp2 = st.columns(2)
+    with c_exp1:
+        if not df_show.empty:
+            excel_data = generate_excel(df_show)
+            st.download_button("Download Excel", excel_data, f'{key_suffix}_{start_d}_{end_d}.xlsx', 
+                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key=f"xl_{key_suffix}")
+    with c_exp2:
+        if not df_show.empty:
+            pdf_data = generate_recap_pdf(df_show, start_d, end_d, jenis_filter)
+            st.download_button("Download PDF Rekap", pdf_data, f'{key_suffix}_{start_d}_{end_d}.pdf', 'application/pdf', key=f"pdf_{key_suffix}")
     
-    if not df_sm_filtered.empty:
-        st.dataframe(df_sm_filtered.sort_values(by="No", ascending=False), use_container_width=True, hide_index=True)
+    # --- TABEL DATA ---
+    if not df_show.empty:
+        display_df = df_show.drop(columns=['Bulan', 'Tahun', 'Keterangan'], errors='ignore').sort_values(by="No", ascending=False)
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+        # --- FITUR HAPUS DATA ---
+        st.markdown("### 🗑️ Zona Hapus Data")
+        with st.expander(f"Buka untuk menghapus data {tab_name}"):
+            st.warning("⚠️ Perhatian: Data yang dihapus tidak dapat dikembalikan.")
+            
+            # Buat list opsi penghapusan yang informatif
+            # Format: [Nomor Surat] - [Perihal]
+            delete_options = df_show.apply(lambda x: f"{x['Nomor_Surat']} | {x['Perihal']}", axis=1).tolist()
+            
+            selected_option = st.selectbox("Pilih surat yang ingin dihapus:", ["-- Pilih Surat --"] + delete_options, key=f"del_sel_{key_suffix}")
+            
+            if selected_option != "-- Pilih Surat --":
+                # Ambil Nomor Surat dari string yang dipilih (split berdasarkan " | ")
+                nomor_to_delete = selected_option.split(" | ")[0]
+                
+                if st.button(f"Hapus Permanen {nomor_to_delete}", type="primary", key=f"btn_del_{key_suffix}"):
+                    # Proses Hapus dari Database Utama
+                    current_db = load_data()
+                    new_db = current_db[current_db['Nomor_Surat'] != nomor_to_delete]
+                    save_data(new_db)
+                    st.success(f"Data {nomor_to_delete} berhasil dihapus!")
+                    st.rerun()
+
+with tab1:
+    render_report_tab("Surat Masuk", "Surat Masuk", "sm")
 
 with tab2:
-    st.subheader("Laporan Surat Keluar")
-    col_sk1, col_sk2 = st.columns(2)
-    with col_sk1:
-        start_sk = st.date_input("Dari Tanggal", value=today.replace(day=1), key="start_sk")
-    with col_sk2:
-        end_sk = st.date_input("Sampai Tanggal", value=today, key="end_sk")
-    
-    df_sk = load_data()
-    df_sk = df_sk[df_sk['Jenis'] == "Surat Keluar"]
-    if not df_sk.empty:
-        mask = (df_sk['Tanggal'] >= start_sk) & (df_sk['Tanggal'] <= end_sk)
-        df_sk_filtered = df_sk.loc[mask]
-    else:
-        df_sk_filtered = df_sk
-    
-    st.info(f"Menampilkan **{len(df_sk_filtered)}** Surat Keluar")
-    
-    col_exp_sk1, col_exp_sk2 = st.columns(2)
-    with col_exp_sk1:
-        if not df_sk_filtered.empty:
-            excel_sk = generate_excel(df_sk_filtered)
-            st.download_button("Download Excel", excel_sk, f'Surat_Keluar_{start_sk}_{end_sk}.xlsx', 
-                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key="exp_sk_xl")
-    with col_exp_sk2:
-        if not df_sk_filtered.empty:
-            pdf_sk = generate_recap_pdf(df_sk_filtered, start_sk, end_sk, "Surat Keluar")
-            st.download_button("Download PDF", pdf_sk, f'Surat_Keluar_{start_sk}_{end_sk}.pdf', 'application/pdf', key="exp_sk_pdf")
-    
-    if not df_sk_filtered.empty:
-        st.dataframe(df_sk_filtered.sort_values(by="No", ascending=False), use_container_width=True, hide_index=True)
+    render_report_tab("Surat Keluar", "Surat Keluar", "sk")
 
 with tab3:
-    st.subheader("Laporan Surat Keputusan (SK)")
-    col_skep1, col_skep2 = st.columns(2)
-    with col_skep1:
-        start_skep = st.date_input("Dari Tanggal", value=today.replace(day=1), key="start_skep")
-    with col_skep2:
-        end_skep = st.date_input("Sampai Tanggal", value=today, key="end_skep")
-    
-    df_skep = load_data()
-    df_skep = df_skep[df_skep['Jenis'] == "Surat Keputusan (SK)"]
-    if not df_skep.empty:
-        mask = (df_skep['Tanggal'] >= start_skep) & (df_skep['Tanggal'] <= end_skep)
-        df_skep_filtered = df_skep.loc[mask]
-    else:
-        df_skep_filtered = df_skep
-    
-    st.info(f"Menampilkan **{len(df_skep_filtered)}** Surat Keputusan")
-    
-    col_exp_skep1, col_exp_skep2 = st.columns(2)
-    with col_exp_skep1:
-        if not df_skep_filtered.empty:
-            excel_skep = generate_excel(df_skep_filtered)
-            st.download_button("Download Excel", excel_skep, f'SK_{start_skep}_{end_skep}.xlsx', 
-                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key="exp_skep_xl")
-    with col_exp_skep2:
-        if not df_skep_filtered.empty:
-            pdf_skep = generate_recap_pdf(df_skep_filtered, start_skep, end_skep, "Surat Keputusan (SK)")
-            st.download_button("Download PDF", pdf_skep, f'SK_{start_skep}_{end_skep}.pdf', 'application/pdf', key="exp_skep_pdf")
-    
-    if not df_skep_filtered.empty:
-        st.dataframe(df_skep_filtered.sort_values(by="No", ascending=False), use_container_width=True, hide_index=True)
+    render_report_tab("Surat Keputusan", "Surat Keputusan (SK)", "skep")
 
 with tab4:
-    st.subheader("Laporan Perjanjian Kerjasama (MOU)")
-    col_mou1, col_mou2 = st.columns(2)
-    with col_mou1:
-        start_mou = st.date_input("Dari Tanggal", value=today.replace(day=1), key="start_mou")
-    with col_mou2:
-        end_mou = st.date_input("Sampai Tanggal", value=today, key="end_mou")
-    
-    df_mou = load_data()
-    df_mou = df_mou[df_mou['Jenis'] == "Perjanjian Kerjasama (MOU)"]
-    if not df_mou.empty:
-        mask = (df_mou['Tanggal'] >= start_mou) & (df_mou['Tanggal'] <= end_mou)
-        df_mou_filtered = df_mou.loc[mask]
-    else:
-        df_mou_filtered = df_mou
-    
-    st.info(f"Menampilkan **{len(df_mou_filtered)}** Perjanjian Kerjasama")
-    
-    col_exp_mou1, col_exp_mou2 = st.columns(2)
-    with col_exp_mou1:
-        if not df_mou_filtered.empty:
-            excel_mou = generate_excel(df_mou_filtered)
-            st.download_button("Download Excel", excel_mou, f'MOU_{start_mou}_{end_mou}.xlsx', 
-                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key="exp_mou_xl")
-    with col_exp_mou2:
-        if not df_mou_filtered.empty:
-            pdf_mou = generate_recap_pdf(df_mou_filtered, start_mou, end_mou, "Perjanjian Kerjasama (MOU)")
-            st.download_button("Download PDF", pdf_mou, f'MOU_{start_mou}_{end_mou}.pdf', 'application/pdf', key="exp_mou_pdf")
-    
-    if not df_mou_filtered.empty:
-        st.dataframe(df_mou_filtered.sort_values(by="No", ascending=False), use_container_width=True, hide_index=True)
+    render_report_tab("MOU", "Perjanjian Kerjasama (MOU)", "mou")
 
 st.caption("*Setiap jenis surat memiliki penomoran terpisah. Nomor reset ke 001 setiap awal tahun. 5 nomor dilewati setiap pergantian bulan.*")
