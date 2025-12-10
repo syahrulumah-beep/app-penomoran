@@ -14,17 +14,19 @@ st.set_page_config(
 )
 
 DB_FILE = 'data_surat.csv'
+SKIP_FILE = 'skipped_numbers.csv'
 
 # Inisialisasi Session State
 if 'last_saved' not in st.session_state:
     st.session_state.last_saved = {}
 
+
 def load_data():
     required_columns = ["No", "Jenis", "Tanggal", "Bulan", "Tahun", "Kode_Klasifikasi", "Kepada", "Perihal", "Keterangan", "Nomor_Surat"]
-    
+
     if not os.path.exists(DB_FILE):
         return pd.DataFrame(columns=required_columns)
-    
+
     df = pd.read_csv(DB_FILE)
     # Pastikan tipe kolom yang penting benar
     if 'Tanggal' in df.columns:
@@ -43,8 +45,59 @@ def load_data():
             df[col] = pd.Series(dtype='int')
     return df
 
+
 def save_data(df):
     df.to_csv(DB_FILE, index=False)
+
+
+# Skipped numbers functions
+def load_skipped():
+    cols = ['Jenis', 'Tahun', 'No', 'Created']
+    if not os.path.exists(SKIP_FILE):
+        return pd.DataFrame(columns=cols)
+    df = pd.read_csv(SKIP_FILE)
+    if 'No' in df.columns:
+        df['No'] = pd.to_numeric(df['No'], errors='coerce').fillna(0).astype(int)
+    else:
+        df['No'] = pd.Series(dtype='int')
+    if 'Tahun' in df.columns:
+        df['Tahun'] = pd.to_numeric(df['Tahun'], errors='coerce').fillna(0).astype(int)
+    else:
+        df['Tahun'] = pd.Series(dtype='int')
+    return df[cols]
+
+
+def save_skipped(df):
+    df.to_csv(SKIP_FILE, index=False)
+
+
+def get_skipped_numbers(df_skipped, jenis, tahun):
+    dff = df_skipped[(df_skipped['Jenis'] == jenis) & (df_skipped['Tahun'] == tahun)]
+    return sorted(dff['No'].astype(int).tolist())
+
+
+def add_skipped_number(jenis, tahun, no):
+    df_skipped = load_skipped()
+    # if already skipped, ignore
+    exists = ((df_skipped['Jenis'] == jenis) & (df_skipped['Tahun'] == tahun) & (df_skipped['No'] == int(no))).any()
+    if exists:
+        return False
+    new = pd.DataFrame([{
+        'Jenis': jenis,
+        'Tahun': int(tahun),
+        'No': int(no),
+        'Created': date.today().isoformat()
+    }])
+    df_skipped = pd.concat([df_skipped, new], ignore_index=True)
+    save_skipped(df_skipped)
+    return True
+
+
+def remove_skipped_number(jenis, tahun, no):
+    df_skipped = load_skipped()
+    df_skipped = df_skipped[~((df_skipped['Jenis'] == jenis) & (df_skipped['Tahun'] == int(tahun)) & (df_skipped['No'] == int(no)))]
+    save_skipped(df_skipped)
+
 
 def _smallest_missing_number(existing_numbers):
     """
@@ -58,6 +111,7 @@ def _smallest_missing_number(existing_numbers):
             return i
         i += 1
 
+
 def get_next_number(df, tanggal, jenis_surat, mode='continuous'):
     """
     Determine the next 'No' for the given jenis_surat and tanggal.
@@ -68,18 +122,18 @@ def get_next_number(df, tanggal, jenis_surat, mode='continuous'):
     The previous behavior of jumping 5 numbers between months has been removed.
     """
     tahun = tanggal.year
-    
+
     df_jenis = df[df['Jenis'] == jenis_surat]
     df_tahun = df_jenis[df_jenis['Tahun'] == tahun]
-    
+
     if df_tahun.empty:
         return 1
-    
+
     # Ensure we work with integer 'No' values
     existing_numbers = df_tahun['No'].dropna().astype(int).tolist()
     if len(existing_numbers) == 0:
         return 1
-    
+
     if mode == 'fill_gaps':
         missing = _smallest_missing_number(existing_numbers)
         return missing
@@ -87,13 +141,15 @@ def get_next_number(df, tanggal, jenis_surat, mode='continuous'):
         current_max = max(existing_numbers)
         return current_max + 1
 
+
 def format_nomor(nomor):
     return str(int(nomor)).zfill(3)
+
 
 def generate_single_pdf(nomor, perihal, tanggal, kepada, keterangan, jenis):
     pdf = FPDF()
     pdf.add_page()
-    
+
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "KLINIK UTAMA RAWAT INAP PARUNG", ln=True, align='C')
     pdf.set_font("Arial", size=10)
@@ -107,9 +163,9 @@ def generate_single_pdf(nomor, perihal, tanggal, kepada, keterangan, jenis):
         pdf.cell(0, 5, jenis.upper(), ln=True, align='C')
         pdf.cell(0, 5, f"NOMOR: {nomor}", ln=True, align='C')
         pdf.ln(10)
-    
+
     pdf.set_font("Arial", size=12)
-    
+
     # Format tanggal dd-mm-yy
     tgl_str = tanggal.strftime('%d-%m-%y')
     pdf.cell(0, 10, f"Tanggal: {tgl_str}", ln=True, align='R')
@@ -118,7 +174,7 @@ def generate_single_pdf(nomor, perihal, tanggal, kepada, keterangan, jenis):
         pdf.cell(30, 8, "Nomor", 0, 0)
         pdf.cell(5, 8, ":", 0, 0)
         pdf.cell(0, 8, nomor, 0, 1)
-        
+
         pdf.cell(30, 8, "Perihal", 0, 0)
         pdf.cell(5, 8, ":", 0, 0)
         pdf.cell(0, 8, perihal, 0, 1)
@@ -133,12 +189,13 @@ def generate_single_pdf(nomor, perihal, tanggal, kepada, keterangan, jenis):
 
     pdf.ln(5)
     pdf.multi_cell(0, 8, keterangan)
-    
+
     pdf.ln(20)
     pdf.cell(120)
     pdf.cell(0, 8, "( __________________ )", ln=True)
-    
+
     return pdf.output(dest='S').encode('latin-1', 'replace')
+
 
 def generate_recap_pdf(df, start_date, end_date, jenis_surat):
     pdf = FPDF(orientation='L', format='A4')
@@ -174,10 +231,10 @@ def generate_recap_pdf(df, start_date, end_date, jenis_surat):
     pdf.set_font("Arial", size=9)
     for index, row in df.iterrows():
         tgl = row['Tanggal'].strftime('%d-%m-%y') if isinstance(row['Tanggal'], date) else str(row['Tanggal'])
-        
+
         perihal_txt = str(row['Perihal'])
         perihal_short = (perihal_txt[:75] + '...') if len(perihal_txt) > 75 else perihal_txt
-        
+
         kepada_txt = str(row['Kepada'])
         kepada_short = (kepada_txt[:20] + '..') if len(kepada_txt) > 20 else kepada_txt
 
@@ -193,6 +250,7 @@ def generate_recap_pdf(df, start_date, end_date, jenis_surat):
 
     return pdf.output(dest='S').encode('latin-1', 'replace')
 
+
 def generate_excel(df):
     # Buat salinan agar tidak memodifikasi sumber
     df_out = df.copy()
@@ -207,13 +265,23 @@ def generate_excel(df):
             worksheet.set_column(i, i, max_len)
     return output.getvalue()
 
-def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, keterangan, df, mode='continuous'):
+
+def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, keterangan, df, mode='continuous', forced_no=None):
     if not kode_klasifikasi:
         return None, "Kode Klasifikasi wajib diisi!", None
-    
-    final_no_urut = get_next_number(df, tanggal, jenis_surat, mode=mode)
+
+    # If a forced_no is provided (from previously skipped numbers), use it.
+    if forced_no is not None:
+        final_no_urut = int(forced_no)
+        # Check duplicate
+        conflict = ((df['Jenis'] == jenis_surat) & (df['Tahun'] == tanggal.year) & (df['No'] == final_no_urut)).any()
+        if conflict:
+            return None, f"Nomor {format_nomor(final_no_urut)} sudah ada untuk jenis {jenis_surat} tahun {tanggal.year}.", None
+    else:
+        final_no_urut = get_next_number(df, tanggal, jenis_surat, mode=mode)
+
     nomor_formatted = format_nomor(final_no_urut)
-    
+
     if jenis_surat == "Surat Masuk":
         final_nomor_surat = f"{kode_klasifikasi}/{nomor_formatted}-KURIP"
     elif jenis_surat == "Surat Keluar":
@@ -224,7 +292,7 @@ def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, ketera
         final_nomor_surat = f"{kode_klasifikasi}/{nomor_formatted}/KURIP/{tanggal.year}"
     else:
         return None, "Jenis surat tidak valid", None
-        
+
     new_data = pd.DataFrame({
         "No": [final_no_urut],
         "Jenis": [jenis_surat],
@@ -237,14 +305,19 @@ def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, ketera
         "Keterangan": [keterangan],
         "Nomor_Surat": [final_nomor_surat]
     })
-    
+
     new_data['Tanggal'] = pd.to_datetime(new_data['Tanggal']).dt.date
-    
+
     updated_df = pd.concat([df, new_data], ignore_index=True)
     save_data(updated_df)
-    
+
+    # If this number was previously skipped, remove it from skipped list
+    df_skipped = load_skipped()
+    if ((df_skipped['Jenis'] == jenis_surat) & (df_skipped['Tahun'] == tanggal.year) & (df_skipped['No'] == int(final_no_urut))).any():
+        remove_skipped_number(jenis_surat, tanggal.year, final_no_urut)
+
     pdf_bytes = generate_single_pdf(final_nomor_surat, perihal, tanggal, kepada, keterangan, jenis_surat)
-    
+
     return final_nomor_surat, None, pdf_bytes
 
 
@@ -255,6 +328,7 @@ st.subheader("Umum dan Kepegawaian")
 st.markdown("---")
 
 df = load_data()
+df_skipped = load_skipped()
 
 col1, col2 = st.columns(2)
 
@@ -264,147 +338,107 @@ mode_label_map = {
     'Isi Nomor Kosong (mengisi celah nomor yang terlewat)': 'fill_gaps'
 }
 
-# --- SURAT MASUK ---
-with col1:
-    with st.container(border=True):
-        st.markdown("### Surat Masuk")
-        st.caption("Format: Kode Klasifikasi/NomorSurat-KURIP")
-        
-        with st.form("form_surat_masuk", clear_on_submit=True):
-            kode_sm = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM")
-            tanggal_sm = st.date_input("Tanggal", key="tgl_sm")
-            kepada_sm = st.text_input("Kepada / Tujuan")
-            perihal_sm = st.text_input("Perihal")
-            keterangan_sm = st.text_area("Keterangan", height=80)
-            
-            selected_mode_label_sm = st.selectbox("Mode Penomoran", list(mode_label_map.keys()), index=0, key="mode_sm")
-            mode_sm = mode_label_map[selected_mode_label_sm]
-            
-            calon_no = get_next_number(df, tanggal_sm, "Surat Masuk", mode=mode_sm)
-            st.info(f"Preview Next Number: **{format_nomor(calon_no)}**  (Mode: {'Isi Celah' if mode_sm=='fill_gaps' else 'Lanjutkan'})")
-            
-            submit_sm = st.form_submit_button("Simpan Surat Masuk")
-        
-        if submit_sm:
-            df = load_data()
-            nomor, error, pdf_bytes = process_form("Surat Masuk", kode_sm, tanggal_sm, kepada_sm, perihal_sm, keterangan_sm, df, mode=mode_sm)
-            if error:
-                st.error(error)
-            else:
-                st.success(f"Tersimpan: {nomor}")
-                st.session_state.last_saved['sm'] = {'nomor': nomor, 'pdf': pdf_bytes}
-                st.rerun()
-        
-        if 'sm' in st.session_state.last_saved:
-            data = st.session_state.last_saved['sm']
-            st.download_button("Download Bukti PDF", data['pdf'], f"SM_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_sm")
 
-# --- SURAT KELUAR ---
-with col2:
-    with st.container(border=True):
-        st.markdown("### Surat Keluar")
-        st.caption("Format: Kode Klasifikasi/NomorSurat-KURIP")
-        
-        with st.form("form_surat_keluar", clear_on_submit=True):
-            kode_sk = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM")
-            tanggal_sk = st.date_input("Tanggal", key="tgl_sk")
-            kepada_sk = st.text_input("Kepada / Tujuan")
-            perihal_sk = st.text_input("Perihal")
-            keterangan_sk = st.text_area("Keterangan", height=80)
-            
-            selected_mode_label_sk = st.selectbox("Mode Penomoran", list(mode_label_map.keys()), index=0, key="mode_sk")
-            mode_sk = mode_label_map[selected_mode_label_sk]
-            
-            calon_no_sk = get_next_number(df, tanggal_sk, "Surat Keluar", mode=mode_sk)
-            st.info(f"Preview Next Number: **{format_nomor(calon_no_sk)}**  (Mode: {'Isi Celah' if mode_sk=='fill_gaps' else 'Lanjutkan'})")
-            
-            submit_sk = st.form_submit_button("Simpan Surat Keluar")
-        
-        if submit_sk:
-            df = load_data()
-            nomor, error, pdf_bytes = process_form("Surat Keluar", kode_sk, tanggal_sk, kepada_sk, perihal_sk, keterangan_sk, df, mode=mode_sk)
-            if error:
-                st.error(error)
+def render_form_for_type(container, jenis_label, jenis_internal, key_prefix):
+    """
+    Helper to render form for each jenis surat to avoid duplicate code.
+    key_prefix: unique key per form to avoid Streamlit key collision.
+    """
+    with container:
+        with st.container(border=True):
+            st.markdown(f"### {jenis_label}")
+            if "Keputusan" in jenis_label:
+                st.caption("Format: Kode Klasifikasi/SK-NomorSurat/KURIP/Tahun")
+            elif "Perjanjian" in jenis_label:
+                st.caption("Format: Kode Klasifikasi/NomorSurat/KURIP/Tahun")
             else:
-                st.success(f"Tersimpan: {nomor}")
-                st.session_state.last_saved['sk'] = {'nomor': nomor, 'pdf': pdf_bytes}
-                st.rerun()
-        
-        if 'sk' in st.session_state.last_saved:
-            data = st.session_state.last_saved['sk']
-            st.download_button("Download Bukti PDF", data['pdf'], f"SK_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_sk")
+                st.caption("Format: Kode Klasifikasi/NomorSurat-KURIP")
+
+            with st.form(f"form_{key_prefix}", clear_on_submit=False):
+                kode = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM", key=f"kode_{key_prefix}")
+                tanggal = st.date_input("Tanggal", key=f"tgl_{key_prefix}")
+                kepada = st.text_input("Kepada / Tujuan", key=f"kepada_{key_prefix}")
+                perihal = st.text_input("Perihal", key=f"perihal_{key_prefix}")
+                keterangan = st.text_area("Keterangan", height=80, key=f"keterangan_{key_prefix}")
+
+                # Mode per jenis
+                selected_mode_label = st.selectbox("Mode Penomoran", list(mode_label_map.keys()), index=0, key=f"mode_{key_prefix}")
+                mode = mode_label_map[selected_mode_label]
+
+                # Show available skipped numbers for this jenis & year
+                tahun = tanggal.year
+                skipped_for_type = get_skipped_numbers(load_skipped(), jenis_internal, tahun)
+                skipped_options = ["-- Pilih nomor kosong --"] + [format_nomor(n) for n in skipped_for_type]
+                selected_skipped = st.selectbox("Pakai nomor kosong yang sudah dilewati (jika ada):", skipped_options, key=f"selected_skipped_{key_prefix}")
+
+                # Option to skip/reserve the next number
+                st.markdown("---")
+                st.markdown("Lewati nomor (reserve 1 nomor kosong) — jika ingin melewatkan nomor berikutnya dan menggunakannya nanti.")
+                lewati_btn = st.form_submit_button("Lewati 1 Nomor (Reserve)", key=f"btn_lewati_{key_prefix}")
+                # Preview next number (continuous mode for previewing skip)
+                calon_no_preview = get_next_number(df, tanggal, jenis_internal, mode='continuous')
+                st.info(f"Preview Next Number jika dilewati/diisi otomatis: **{format_nomor(calon_no_preview)}**")
+
+                st.markdown("---")
+                submit_btn = st.form_submit_button("Simpan Surat", key=f"btn_simpan_{key_prefix}")
+
+                # Handle skip action
+                if lewati_btn:
+                    # Determine next number to reserve (continuous)
+                    df_current = load_data()
+                    next_no = get_next_number(df_current, tanggal, jenis_internal, mode='continuous')
+                    # Ensure not already used
+                    used_conflict = ((df_current['Jenis'] == jenis_internal) & (df_current['Tahun'] == tanggal.year) & (df_current['No'] == int(next_no))).any()
+                    if used_conflict:
+                        st.error(f"Nomor {format_nomor(next_no)} sudah digunakan, tidak bisa dilewati.")
+                    else:
+                        added = add_skipped_number(jenis_internal, tanggal.year, next_no)
+                        if added:
+                            st.success(f"Nomor {format_nomor(next_no)} berhasil dilewati (reserved). Anda dapat memilihnya saat menyimpan surat selanjutnya.")
+                        else:
+                            st.warning(f"Nomor {format_nomor(next_no)} sudah dalam daftar nomor dilewati.")
+                        st.experimental_rerun()
+
+                # Handle save action
+                if submit_btn:
+                    df_current = load_data()
+                    # If user selected a skipped number, use it
+                    forced_no = None
+                    if selected_skipped != "-- Pilih nomor kosong --":
+                        # map back to int
+                        try:
+                            forced_no = int(selected_skipped)
+                        except Exception:
+                            # if formatted with leading zeros, convert properly
+                            forced_no = int(selected_skipped.lstrip('0') or '0')
+                    nomor, error, pdf_bytes = process_form(jenis_internal, kode, tanggal, kepada, perihal, keterangan, df_current, mode=mode, forced_no=forced_no)
+                    if error:
+                        st.error(error)
+                    else:
+                        st.success(f"Tersimpan: {nomor}")
+                        st.session_state.last_saved[key_prefix] = {'nomor': nomor, 'pdf': pdf_bytes}
+                        st.experimental_rerun()
+
+            # Download last saved for this type
+            if key_prefix in st.session_state.last_saved:
+                data = st.session_state.last_saved[key_prefix]
+                st.download_button("Download Bukti PDF", data['pdf'], f"{key_prefix.upper()}_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key=f"dl_{key_prefix}")
+
+# Render forms per jenis
+with col1:
+    render_form_for_type(col1, "Surat Masuk", "Surat Masuk", "sm")
+
+with col2:
+    render_form_for_type(col2, "Surat Keluar", "Surat Keluar", "sk")
 
 col3, col4 = st.columns(2)
 
-# --- SURAT KEPUTUSAN (SK) ---
 with col3:
-    with st.container(border=True):
-        st.markdown("### Surat Keputusan (SK)")
-        st.caption("Format: Kode Klasifikasi/SK-NomorSurat/KURIP/Tahun")
-        
-        with st.form("form_sk", clear_on_submit=True):
-            kode_skep = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM")
-            tanggal_skep = st.date_input("Tanggal", key="tgl_skep")
-            kepada_skep = st.text_input("Kepada / Tujuan")
-            perihal_skep = st.text_input("Perihal")
-            keterangan_skep = st.text_area("Keterangan", height=80)
-            
-            selected_mode_label_skep = st.selectbox("Mode Penomoran", list(mode_label_map.keys()), index=0, key="mode_skep")
-            mode_skep = mode_label_map[selected_mode_label_skep]
-            
-            calon_no_skep = get_next_number(df, tanggal_skep, "Surat Keputusan (SK)", mode=mode_skep)
-            st.info(f"Preview Next Number: **SK-{format_nomor(calon_no_skep)}**  (Mode: {'Isi Celah' if mode_skep=='fill_gaps' else 'Lanjutkan'})")
-            
-            submit_skep = st.form_submit_button("Simpan Surat Keputusan")
-        
-        if submit_skep:
-            df = load_data()
-            nomor, error, pdf_bytes = process_form("Surat Keputusan (SK)", kode_skep, tanggal_skep, kepada_skep, perihal_skep, keterangan_skep, df, mode=mode_skep)
-            if error:
-                st.error(error)
-            else:
-                st.success(f"Tersimpan: {nomor}")
-                st.session_state.last_saved['skep'] = {'nomor': nomor, 'pdf': pdf_bytes}
-                st.rerun()
-        
-        if 'skep' in st.session_state.last_saved:
-            data = st.session_state.last_saved['skep']
-            st.download_button("Download Bukti PDF", data['pdf'], f"SKEP_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_skep")
+    render_form_for_type(col3, "Surat Keputusan (SK)", "Surat Keputusan (SK)", "skep")
 
-# --- MOU ---
 with col4:
-    with st.container(border=True):
-        st.markdown("### Perjanjian Kerjasama (MOU)")
-        st.caption("Format: Kode Klasifikasi/NomorSurat/KURIP/Tahun")
-        
-        with st.form("form_mou", clear_on_submit=True):
-            kode_mou = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM")
-            tanggal_mou = st.date_input("Tanggal", key="tgl_mou")
-            kepada_mou = st.text_input("Kepada / Tujuan")
-            perihal_mou = st.text_input("Perihal")
-            keterangan_mou = st.text_area("Keterangan", height=80)
-            
-            selected_mode_label_mou = st.selectbox("Mode Penomoran", list(mode_label_map.keys()), index=0, key="mode_mou")
-            mode_mou = mode_label_map[selected_mode_label_mou]
-            
-            calon_no_mou = get_next_number(df, tanggal_mou, "Perjanjian Kerjasama (MOU)", mode=mode_mou)
-            st.info(f"Preview Next Number: **{format_nomor(calon_no_mou)}**  (Mode: {'Isi Celah' if mode_mou=='fill_gaps' else 'Lanjutkan'})")
-            
-            submit_mou = st.form_submit_button("Simpan Perjanjian Kerjasama")
-        
-        if submit_mou:
-            df = load_data()
-            nomor, error, pdf_bytes = process_form("Perjanjian Kerjasama (MOU)", kode_mou, tanggal_mou, kepada_mou, perihal_mou, keterangan_mou, df, mode=mode_mou)
-            if error:
-                st.error(error)
-            else:
-                st.success(f"Tersimpan: {nomor}")
-                st.session_state.last_saved['mou'] = {'nomor': nomor, 'pdf': pdf_bytes}
-                st.rerun()
-        
-        if 'mou' in st.session_state.last_saved:
-            data = st.session_state.last_saved['mou']
-            st.download_button("Download Bukti PDF", data['pdf'], f"MOU_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_mou")
+    render_form_for_type(col4, "Perjanjian Kerjasama (MOU)", "Perjanjian Kerjasama (MOU)", "mou")
+
 
 st.markdown("---")
 st.header("Laporan & Ekspor Data")
@@ -414,40 +448,41 @@ df_report = load_data()
 
 tab1, tab2, tab3, tab4 = st.tabs(["Surat Masuk", "Surat Keluar", "Surat Keputusan (SK)", "Perjanjian Kerjasama (MOU)"])
 
+
 # FUNGSI UNTUK MENAMPILKAN DAN MENGHAPUS DATA
 def render_report_tab(tab_name, jenis_filter, key_suffix):
     df_filtered = df_report[df_report['Jenis'] == jenis_filter]
-    
+
     st.subheader(f"Laporan {tab_name}")
     c1, c2 = st.columns(2)
     with c1:
         start_d = st.date_input("Dari Tanggal", value=today.replace(day=1), key=f"start_{key_suffix}")
     with c2:
         end_d = st.date_input("Sampai Tanggal", value=today, key=f"end_{key_suffix}")
-    
+
     if not df_filtered.empty:
         mask = (df_filtered['Tanggal'] >= start_d) & (df_filtered['Tanggal'] <= end_d)
         df_show = df_filtered.loc[mask]
     else:
         df_show = df_filtered
-    
+
     st.info(f"Menampilkan **{len(df_show)}** dokumen")
-    
+
     # Format tanggal string untuk nama file dd-mm-yy
     start_str = start_d.strftime('%d-%m-%y')
     end_str = end_d.strftime('%d-%m-%y')
-    
+
     c_exp1, c_exp2 = st.columns(2)
     with c_exp1:
         if not df_show.empty:
             excel_data = generate_excel(df_show)
-            st.download_button("Download Excel", excel_data, f'{key_suffix}_{start_str}_{end_str}.xlsx', 
-                             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key=f"xl_{key_suffix}")
+            st.download_button("Download Excel", excel_data, f'{key_suffix}_{start_str}_{end_str}.xlsx',
+                               'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key=f"xl_{key_suffix}")
     with c_exp2:
         if not df_show.empty:
             pdf_data = generate_recap_pdf(df_show, start_d, end_d, jenis_filter)
             st.download_button("Download PDF Rekap", pdf_data, f'{key_suffix}_{start_str}_{end_str}.pdf', 'application/pdf', key=f"pdf_{key_suffix}")
-    
+
     # --- TABEL DATA ---
     if not df_show.empty:
         display_df = df_show.copy()
@@ -456,22 +491,22 @@ def render_report_tab(tab_name, jenis_filter, key_suffix):
             display_df['Tanggal'] = display_df['Tanggal'].apply(lambda x: x.strftime('%d-%m-%y') if pd.notnull(x) and isinstance(x, date) else (str(x) if pd.notnull(x) else ''))
         display_df = display_df.drop(columns=['Bulan', 'Tahun', 'Keterangan'], errors='ignore').sort_values(by="No", ascending=False)
         st.dataframe(display_df, use_container_width=True, hide_index=True)
-        
+
         # --- FITUR HAPUS DATA ---
         st.markdown("### 🗑️ Zona Hapus Data")
         with st.expander(f"Buka untuk menghapus data {tab_name}"):
             st.warning("⚠️ Perhatian: Data yang dihapus tidak dapat dikembalikan.")
-            
+
             # Buat list opsi penghapusan yang informatif
             # Format: [Nomor Surat] - [Perihal]
             delete_options = df_show.apply(lambda x: f"{x['Nomor_Surat']} | {x['Perihal']}", axis=1).tolist()
-            
+
             selected_option = st.selectbox("Pilih surat yang ingin dihapus:", ["-- Pilih Surat --"] + delete_options, key=f"del_sel_{key_suffix}")
-            
+
             if selected_option != "-- Pilih Surat --":
                 # Ambil Nomor Surat dari string yang dipilih (split berdasarkan " | ")
                 nomor_to_delete = selected_option.split(" | ")[0]
-                
+
                 if st.button(f"Hapus Permanen {nomor_to_delete}", type="primary", key=f"btn_del_{key_suffix}"):
                     # Proses Hapus dari Database Utama
                     current_db = load_data()
@@ -479,6 +514,7 @@ def render_report_tab(tab_name, jenis_filter, key_suffix):
                     save_data(new_db)
                     st.success(f"Data {nomor_to_delete} berhasil dihapus!")
                     st.rerun()
+
 
 with tab1:
     render_report_tab("Surat Masuk", "Surat Masuk", "sm")
@@ -492,4 +528,4 @@ with tab3:
 with tab4:
     render_report_tab("MOU", "Perjanjian Kerjasama (MOU)", "mou")
 
-st.caption("*Setiap jenis surat memiliki penomoran terpisah. Nomor reset ke 001 setiap awal tahun. Mode penomoran kini dapat diatur per jenis surat (Lanjutkan atau Isi Nomor Kosong). Omitting/jumping 5 numbers between months telah dihapus.*")
+st.caption("*Setiap jenis surat memiliki penomoran terpisah. Nomor reset ke 001 setiap awal tahun. Mode penomoran kini dapat diatur per jenis surat (Lanjutkan atau Isi Nomor Kosong). Fitur 'lewati nomor' tersedia per form dan Anda dapat menggunakan kembali nomor kosong yang sudah dilewati.*")
