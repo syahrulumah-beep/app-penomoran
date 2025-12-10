@@ -1,3 +1,4 @@
+# contents of file
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date
@@ -64,6 +65,10 @@ def load_skipped():
         df['Tahun'] = pd.to_numeric(df['Tahun'], errors='coerce').fillna(0).astype(int)
     else:
         df['Tahun'] = pd.Series(dtype='int')
+    # ensure columns order
+    for c in cols:
+        if c not in df.columns:
+            df[c] = pd.Series(dtype='object')
     return df[cols]
 
 
@@ -99,15 +104,21 @@ def remove_skipped_number(jenis, tahun, no):
     save_skipped(df_skipped)
 
 
-def _smallest_missing_number(existing_numbers):
+def _smallest_missing_number(existing_numbers, reserved_numbers=None):
     """
-    Return the smallest positive integer not present in existing_numbers.
-    If existing_numbers is empty, return 1.
+    Return the smallest positive integer not present in existing_numbers or reserved_numbers.
+    If both sets are empty, return 1.
+    existing_numbers: iterable of ints that are already used
+    reserved_numbers: iterable of ints that are reserved/skipped and should be considered taken for auto-allocation
     """
+    if reserved_numbers is None:
+        reserved_numbers = []
     existing = set(n for n in existing_numbers if isinstance(n, int) and n > 0)
+    reserved = set(n for n in reserved_numbers if isinstance(n, int) and n > 0)
+    taken = existing | reserved
     i = 1
     while True:
-        if i not in existing:
+        if i not in taken:
             return i
         i += 1
 
@@ -116,31 +127,35 @@ def get_next_number(df, tanggal, jenis_surat, mode='continuous'):
     """
     Determine the next 'No' for the given jenis_surat and tanggal.
     mode:
-      - 'continuous' : nomor baru = max(existing) + 1 (or 1 if none)
-      - 'fill_gaps'  : isi nomor kosong / celah (ambil smallest missing positive integer), jika tidak ada celah -> max + 1
-    Note: Nomor reset ke 1 setiap awal tahun (tahun dipisahkan dalam filter).
-    The previous behavior of jumping 5 numbers between months has been removed.
+      - 'continuous' : nomor baru = max(existing U reserved) + 1 (or 1 if none)
+      - 'fill_gaps'  : isi nomor kosong / celah (ambil smallest missing positive integer
+                       yang bukan existing dan bukan reserved)
+    Reserved/skipped numbers are treated as occupied for automatic allocation so they won't be
+    assigned automatically; they must be explicitly chosen by the user from the skipped list.
     """
     tahun = tanggal.year
 
     df_jenis = df[df['Jenis'] == jenis_surat]
     df_tahun = df_jenis[df_jenis['Tahun'] == tahun]
 
-    if df_tahun.empty:
-        return 1
+    # load reserved/skipped numbers for this jenis & tahun
+    skipped_list = get_skipped_numbers(load_skipped(), jenis_surat, tahun)
 
-    # Ensure we work with integer 'No' values
-    existing_numbers = df_tahun['No'].dropna().astype(int).tolist()
-    if len(existing_numbers) == 0:
-        return 1
+    # If there are no existing records for this year, we still must consider skipped numbers
+    existing_numbers = []
+    if not df_tahun.empty:
+        existing_numbers = df_tahun['No'].dropna().astype(int).tolist()
 
     if mode == 'fill_gaps':
-        # Consider also skipped numbers as "available" holes only when they're not yet used.
-        missing = _smallest_missing_number(existing_numbers)
+        # Find smallest missing number not in existing and not in skipped (reserved)
+        missing = _smallest_missing_number(existing_numbers, reserved_numbers=skipped_list)
         return missing
     else:  # continuous
-        current_max = max(existing_numbers)
-        return current_max + 1
+        # continuous should consider both existing and skipped numbers as taken
+        combined = set(existing_numbers) | set(skipped_list)
+        if not combined:
+            return 1
+        return max(combined) + 1
 
 
 def format_nomor(nomor):
@@ -355,7 +370,8 @@ def render_form_for_type(container, jenis_label, jenis_internal, key_prefix):
             else:
                 st.caption("Format: Kode Klasifikasi/NomorSurat-KURIP")
 
-            with st.form(f"form_{key_prefix}", clear_on_submit=False):
+            # Use clear_on_submit=True to reset form fields after successful submit
+            with st.form(f"form_{key_prefix}", clear_on_submit=True):
                 kode = st.text_input("Kode Klasifikasi", placeholder="Cth: 005, ADM", key=f"kode_{key_prefix}")
                 tanggal = st.date_input("Tanggal", key=f"tgl_{key_prefix}")
                 kepada = st.text_input("Kepada / Tujuan", key=f"kepada_{key_prefix}")
@@ -398,7 +414,6 @@ def render_form_for_type(container, jenis_label, jenis_internal, key_prefix):
                             st.success(f"Nomor {format_nomor(next_no)} berhasil dilewati (reserved). Anda dapat memilihnya saat menyimpan surat selanjutnya.")
                         else:
                             st.warning(f"Nomor {format_nomor(next_no)} sudah dalam daftar nomor dilewati.")
-                    # no st.experimental_rerun() here — let Streamlit re-run naturally after form submit
 
                 # Handle save action
                 if submit_btn:
@@ -410,7 +425,6 @@ def render_form_for_type(container, jenis_label, jenis_internal, key_prefix):
                         try:
                             forced_no = int(selected_skipped)
                         except Exception:
-                            # if formatted with leading zeros, convert properly
                             forced_no = int(selected_skipped.lstrip('0') or '0')
                     nomor, error, pdf_bytes = process_form(jenis_internal, kode, tanggal, kepada, perihal, keterangan, df_current, mode=mode, forced_no=forced_no)
                     if error:
@@ -418,7 +432,6 @@ def render_form_for_type(container, jenis_label, jenis_internal, key_prefix):
                     else:
                         st.success(f"Tersimpan: {nomor}")
                         st.session_state.last_saved[key_prefix] = {'nomor': nomor, 'pdf': pdf_bytes}
-                    # no st.experimental_rerun() here — Streamlit will re-run after form submit
 
             # Download last saved for this type
             if key_prefix in st.session_state.last_saved:
