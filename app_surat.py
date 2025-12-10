@@ -6,9 +6,12 @@ import os
 from fpdf import FPDF
 import io
 
-st.set_page_config(page_title="Sistem Penomoran Surat Klinik Utama Rawat Inap Parung", layout="wide")
+st.set_page_config(page_title="Sistem Penomoran Klinik Utama Rawat Inap Parung", layout="wide")
 
 DB_FILE = 'data_surat.csv'
+
+if 'last_saved' not in st.session_state:
+    st.session_state.last_saved = {}
 
 def load_data():
     required_columns = ["No", "Jenis", "Tanggal", "Bulan", "Tahun", "Kode_Klasifikasi", "Kepada", "Perihal", "Keterangan", "Nomor_Surat"]
@@ -141,7 +144,7 @@ def generate_excel(df):
 
 def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, keterangan, df):
     if not kode_klasifikasi:
-        return None, "Kode Klasifikasi wajib diisi!"
+        return None, "Kode Klasifikasi wajib diisi!", None
     
     final_no_urut = get_next_number(df, tanggal, jenis_surat)
     nomor_formatted = format_nomor(final_no_urut)
@@ -155,7 +158,7 @@ def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, ketera
     elif jenis_surat == "Perjanjian Kerjasama (MOU)":
         final_nomor_surat = f"{kode_klasifikasi}/{nomor_formatted}/KURIP/{tanggal.year}"
     else:
-        return None, "Jenis surat tidak valid"
+        return None, "Jenis surat tidak valid", None
         
     new_data = pd.DataFrame({
         "No": [final_no_urut],
@@ -175,7 +178,9 @@ def process_form(jenis_surat, kode_klasifikasi, tanggal, kepada, perihal, ketera
     updated_df = pd.concat([df, new_data], ignore_index=True)
     save_data(updated_df)
     
-    return final_nomor_surat, None
+    pdf_bytes = generate_single_pdf(final_nomor_surat, perihal, tanggal, kepada, keterangan, jenis_surat)
+    
+    return final_nomor_surat, None, pdf_bytes
 
 
 st.title("Sistem Penomoran Klinik Utama Rawat Inap Parung")
@@ -203,16 +208,19 @@ with col1:
             st.info(f"Preview: **{kode_sm}/{format_nomor(calon_no)}-KURIP**")
             
             submit_sm = st.form_submit_button("Simpan Surat Masuk")
-            
-            if submit_sm:
-                df = load_data()
-                nomor, error = process_form("Surat Masuk", kode_sm, tanggal_sm, kepada_sm, perihal_sm, keterangan_sm, df)
-                if error:
-                    st.error(error)
-                else:
-                    st.success(f"Tersimpan: {nomor}")
-                    pdf_bytes = generate_single_pdf(nomor, perihal_sm, tanggal_sm, kepada_sm, keterangan_sm, "Surat Masuk")
-                    st.download_button("Download PDF", pdf_bytes, f"SM_{nomor.replace('/', '_')}.pdf", "application/pdf", key="dl_sm")
+        
+        if submit_sm:
+            df = load_data()
+            nomor, error, pdf_bytes = process_form("Surat Masuk", kode_sm, tanggal_sm, kepada_sm, perihal_sm, keterangan_sm, df)
+            if error:
+                st.error(error)
+            else:
+                st.success(f"Tersimpan: {nomor}")
+                st.session_state.last_saved['sm'] = {'nomor': nomor, 'pdf': pdf_bytes}
+        
+        if 'sm' in st.session_state.last_saved:
+            data = st.session_state.last_saved['sm']
+            st.download_button("Download PDF", data['pdf'], f"SM_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_sm")
 
 with col2:
     with st.container(border=True):
@@ -230,16 +238,19 @@ with col2:
             st.info(f"Preview: **{kode_sk}/{format_nomor(calon_no_sk)}-KURIP**")
             
             submit_sk = st.form_submit_button("Simpan Surat Keluar")
-            
-            if submit_sk:
-                df = load_data()
-                nomor, error = process_form("Surat Keluar", kode_sk, tanggal_sk, kepada_sk, perihal_sk, keterangan_sk, df)
-                if error:
-                    st.error(error)
-                else:
-                    st.success(f"Tersimpan: {nomor}")
-                    pdf_bytes = generate_single_pdf(nomor, perihal_sk, tanggal_sk, kepada_sk, keterangan_sk, "Surat Keluar")
-                    st.download_button("Download PDF", pdf_bytes, f"SK_{nomor.replace('/', '_')}.pdf", "application/pdf", key="dl_sk")
+        
+        if submit_sk:
+            df = load_data()
+            nomor, error, pdf_bytes = process_form("Surat Keluar", kode_sk, tanggal_sk, kepada_sk, perihal_sk, keterangan_sk, df)
+            if error:
+                st.error(error)
+            else:
+                st.success(f"Tersimpan: {nomor}")
+                st.session_state.last_saved['sk'] = {'nomor': nomor, 'pdf': pdf_bytes}
+        
+        if 'sk' in st.session_state.last_saved:
+            data = st.session_state.last_saved['sk']
+            st.download_button("Download PDF", data['pdf'], f"SK_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_sk")
 
 col3, col4 = st.columns(2)
 
@@ -259,16 +270,19 @@ with col3:
             st.info(f"Preview: **{kode_skep}/SK-{format_nomor(calon_no_skep)}/KURIP/{tanggal_skep.year}**")
             
             submit_skep = st.form_submit_button("Simpan Surat Keputusan")
-            
-            if submit_skep:
-                df = load_data()
-                nomor, error = process_form("Surat Keputusan (SK)", kode_skep, tanggal_skep, kepada_skep, perihal_skep, keterangan_skep, df)
-                if error:
-                    st.error(error)
-                else:
-                    st.success(f"Tersimpan: {nomor}")
-                    pdf_bytes = generate_single_pdf(nomor, perihal_skep, tanggal_skep, kepada_skep, keterangan_skep, "Surat Keputusan (SK)")
-                    st.download_button("Download PDF", pdf_bytes, f"SKEP_{nomor.replace('/', '_')}.pdf", "application/pdf", key="dl_skep")
+        
+        if submit_skep:
+            df = load_data()
+            nomor, error, pdf_bytes = process_form("Surat Keputusan (SK)", kode_skep, tanggal_skep, kepada_skep, perihal_skep, keterangan_skep, df)
+            if error:
+                st.error(error)
+            else:
+                st.success(f"Tersimpan: {nomor}")
+                st.session_state.last_saved['skep'] = {'nomor': nomor, 'pdf': pdf_bytes}
+        
+        if 'skep' in st.session_state.last_saved:
+            data = st.session_state.last_saved['skep']
+            st.download_button("Download PDF", data['pdf'], f"SKEP_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_skep")
 
 with col4:
     with st.container(border=True):
@@ -286,16 +300,19 @@ with col4:
             st.info(f"Preview: **{kode_mou}/{format_nomor(calon_no_mou)}/KURIP/{tanggal_mou.year}**")
             
             submit_mou = st.form_submit_button("Simpan Perjanjian Kerjasama")
-            
-            if submit_mou:
-                df = load_data()
-                nomor, error = process_form("Perjanjian Kerjasama (MOU)", kode_mou, tanggal_mou, kepada_mou, perihal_mou, keterangan_mou, df)
-                if error:
-                    st.error(error)
-                else:
-                    st.success(f"Tersimpan: {nomor}")
-                    pdf_bytes = generate_single_pdf(nomor, perihal_mou, tanggal_mou, kepada_mou, keterangan_mou, "Perjanjian Kerjasama (MOU)")
-                    st.download_button("Download PDF", pdf_bytes, f"MOU_{nomor.replace('/', '_')}.pdf", "application/pdf", key="dl_mou")
+        
+        if submit_mou:
+            df = load_data()
+            nomor, error, pdf_bytes = process_form("Perjanjian Kerjasama (MOU)", kode_mou, tanggal_mou, kepada_mou, perihal_mou, keterangan_mou, df)
+            if error:
+                st.error(error)
+            else:
+                st.success(f"Tersimpan: {nomor}")
+                st.session_state.last_saved['mou'] = {'nomor': nomor, 'pdf': pdf_bytes}
+        
+        if 'mou' in st.session_state.last_saved:
+            data = st.session_state.last_saved['mou']
+            st.download_button("Download PDF", data['pdf'], f"MOU_{data['nomor'].replace('/', '_')}.pdf", "application/pdf", key="dl_mou")
 
 st.markdown("---")
 st.header("Laporan & Ekspor Data")
@@ -431,6 +448,5 @@ with tab4:
     
     if not df_mou_filtered.empty:
         st.dataframe(df_mou_filtered.sort_values(by="No", ascending=False), use_container_width=True, hide_index=True)
-
 
 st.caption("*Setiap jenis surat memiliki penomoran terpisah. Nomor reset ke 001 setiap awal tahun. 5 nomor dilewati setiap pergantian bulan.*")
