@@ -135,6 +135,7 @@ def get_next_number(df, tanggal, jenis_surat, mode='continuous'):
         return 1
 
     if mode == 'fill_gaps':
+        # Consider also skipped numbers as "available" holes only when they're not yet used.
         missing = _smallest_missing_number(existing_numbers)
         return missing
     else:  # continuous
@@ -397,7 +398,7 @@ def render_form_for_type(container, jenis_label, jenis_internal, key_prefix):
                             st.success(f"Nomor {format_nomor(next_no)} berhasil dilewati (reserved). Anda dapat memilihnya saat menyimpan surat selanjutnya.")
                         else:
                             st.warning(f"Nomor {format_nomor(next_no)} sudah dalam daftar nomor dilewati.")
-                        st.experimental_rerun()
+                    # no st.experimental_rerun() here — let Streamlit re-run naturally after form submit
 
                 # Handle save action
                 if submit_btn:
@@ -417,7 +418,7 @@ def render_form_for_type(container, jenis_label, jenis_internal, key_prefix):
                     else:
                         st.success(f"Tersimpan: {nomor}")
                         st.session_state.last_saved[key_prefix] = {'nomor': nomor, 'pdf': pdf_bytes}
-                        st.experimental_rerun()
+                    # no st.experimental_rerun() here — Streamlit will re-run after form submit
 
             # Download last saved for this type
             if key_prefix in st.session_state.last_saved:
